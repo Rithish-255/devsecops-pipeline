@@ -1,42 +1,42 @@
-terraform {
-  required_version = ">= 1.5.0"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.0"
-    }
-  }
+resource "random_string" "suffix" {
+  length  = 6
+  upper   = false
+  special = false
 }
 
-provider "aws" {
-  region = var.aws_region
-}
-
-resource "random_id" "suffix" {
-  byte_length = 4
-}
-
-resource "aws_s3_bucket" "artifact_store" {
-  bucket        = "${var.project_name}-${random_id.suffix.hex}"
-  force_destroy = true
+resource "azurerm_resource_group" "rg" {
+  name     = var.resource_group_name
+  location = var.location
 
   tags = {
-    Name        = var.project_name
     Environment = "dev"
+    Project     = var.project_name
     ManagedBy   = "Terraform"
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "artifact_store" {
-  bucket = aws_s3_bucket.artifact_store.id
+resource "azurerm_storage_account" "sa" {
+  name                     = lower(substr(replace("${var.project_name}${random_string.suffix.result}", "-", ""), 0, 24))
+  resource_group_name      = azurerm_resource_group.rg.name
+  location                 = azurerm_resource_group.rg.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
 
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  tags = {
+    Environment = "dev"
+    Project     = var.project_name
+  }
+}
+
+resource "azurerm_container_registry" "acr" {
+  name                = substr(replace(lower("${var.project_name}${random_string.suffix.result}"), "-", ""), 0, 50)
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  sku                 = "Basic"
+  admin_enabled       = false
+
+  tags = {
+    Environment = "dev"
+    Project     = var.project_name
+  }
 }

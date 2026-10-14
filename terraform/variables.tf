@@ -1,11 +1,17 @@
-variable "aws_region" {
-  description = "AWS Region for deployment"
+variable "location" {
+  description = "Azure region for all resources"
   type        = string
-  default     = "us-east-1"
+  default     = "eastus"
+}
+
+variable "resource_group_name" {
+  description = "Name of the Azure resource group"
+  type        = string
+  default     = "rg-devsecops-demo"
 }
 
 variable "project_name" {
-  description = "Name prefix for all resources"
+  description = "Project prefix used in naming resources"
   type        = string
-  default     = "devsecops-demo"
+  default     = "devsecopsdemo"
 }

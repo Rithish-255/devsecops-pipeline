@@ -1,18 +1,17 @@
-# End-to-End DevSecOps Pipeline on Cloud
+# Azure DevSecOps Pipeline for Containerized App Deployment
 
-This project demonstrates a complete DevSecOps workflow for deploying containerized applications on AWS/Azure using:
-- Terraform for infrastructure provisioning
-- Trivy for container and filesystem vulnerability scanning
-- Gitleaks for secret detection
+This project is an Azure-focused version of the DevSecOps pipeline. It implements a secure CI/CD workflow that includes:
+- Gitleaks for secret scanning
+- Trivy for image and filesystem vulnerability detection
+- Terraform for Azure infrastructure provisioning
 - Jenkins or GitLab CI for automation
+- Azure Container Registry (ACR) and Azure resource deployment
 
-The repository is intentionally designed to be easy to run in a real cloud environment while staying safe for local experimentation.
+## Azure architecture
 
-## Architecture
+Developer pushes code -> Jenkins/GitLab CI -> Gitleaks scan -> Docker build -> Trivy scan -> Terraform plan/apply -> Azure Resource Group + ACR + Storage Account
 
-[Diagram description: Developer pushes code -> GitLab/Jenkins pipeline -> Gitleaks scan -> Docker build -> Trivy scan -> Terraform plan/apply -> AWS/Azure resource deployment]
-
-## Project structure
+## Repository structure
 
 ```text
 .
@@ -37,24 +36,26 @@ The repository is intentionally designed to be easy to run in a real cloud envir
 
 ## Prerequisites
 
-Install the following on the runner or local workstation:
+Install:
 - Docker
 - Terraform >= 1.5
 - Trivy
 - Gitleaks
-- AWS CLI or Azure CLI
+- Azure CLI
 
-For AWS:
-```bash
-aws configure
-```
-
-For Azure:
+Authenticate with Azure:
 ```bash
 az login
+az account set --subscription "<your-subscription-id>"
 ```
 
-## Quick local validation
+Optional CI variables for Azure DevOps / GitLab / Jenkins:
+- ARM_CLIENT_ID
+- ARM_CLIENT_SECRET
+- ARM_TENANT_ID
+- ARM_SUBSCRIPTION_ID
+
+## Local validation
 
 Build the app image:
 ```bash
@@ -83,70 +84,139 @@ terraform -chdir=terraform validate
 terraform -chdir=terraform plan
 ```
 
-## Jenkins pipeline usage
+## Azure deployment
 
-1. Create a Jenkins job pointing to this repository.
-2. Add required environment variables:
-   - AWS_ACCESS_KEY_ID
-   - AWS_SECRET_ACCESS_KEY
-   - AWS_DEFAULT_REGION
-   - or Azure credentials in your preferred secure mechanism
-3. Run the pipeline.
+The Azure Terraform configuration creates the following resources:
+- Azure Resource Group
+- Azure Storage Account
+- Azure Container Registry
 
-The included `Jenkinsfile` runs:
-- checkout
-- secret scan with Gitleaks
-- container build
-- image vulnerability scan with Trivy
-- Terraform init/validate
-- Terraform plan
-- optional apply stage
-
-## GitLab CI usage
-
-The included `.gitlab-ci.yml` defines a pipeline with stages for:
-- secret scan
-- image scan
-- infrastructure validation
-- deployment
-
-Set the project variables in GitLab CI if you want Terraform to apply to AWS or Azure.
-
-## Terraform deployment
-
-The Terraform configuration creates a basic AWS resource (S3 bucket) that demonstrates infrastructure provisioning after the scan stages pass.
-
-Example:
+Deploy:
 ```bash
 terraform -chdir=terraform init
 terraform -chdir=terraform plan -out=tfplan
 terraform -chdir=terraform apply -auto-approve tfplan
 ```
 
-## Security notes
+## Jenkins pipeline (Azure version)
 
-- Do not commit secrets or API keys.
-- Store credentials in CI/CD secret stores such as AWS IAM roles, Azure Key Vault, Jenkins credentials, or GitLab variables.
-- Review Trivy findings before production deployment.
-- Treat scan failures as policy gates.
+```groovy
+pipeline {
+    agent any
 
-## Example output
+    environment {
+        ARM_SUBSCRIPTION_ID = credentials('ARM_SUBSCRIPTION_ID')
+        ARM_TENANT_ID = credentials('ARM_TENANT_ID')
+        ARM_CLIENT_ID = credentials('ARM_CLIENT_ID')
+        ARM_CLIENT_SECRET = credentials('ARM_CLIENT_SECRET')
+        TF_VAR_location = 'eastus'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+
+        stage('Secret Scan') {
+            steps {
+                sh 'curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash'
+                sh 'gitleaks detect --source . --no-banner --exit-code 1'
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh 'docker build -t devsecops-demo:latest .'
+            }
+        }
+
+        stage('Container Scan') {
+            steps {
+                sh 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
+                sh 'trivy image --severity HIGH,CRITICAL devsecops-demo:latest'
+            }
+        }
+
+        stage('Terraform Validate') {
+            steps {
+                sh 'terraform -chdir=terraform init'
+                sh 'terraform -chdir=terraform validate'
+                sh 'terraform -chdir=terraform plan -out=tfplan'
+            }
+        }
+
+        stage('Deploy Infrastructure') {
+            steps {
+                sh 'terraform -chdir=terraform apply -auto-approve tfplan'
+            }
+        }
+    }
+}
+```
+
+## GitLab CI (Azure version)
+
+```yaml
+stages:
+  - scan
+  - build
+  - deploy
+
+variables:
+  TF_VAR_location: "eastus"
+
+secret_scan:
+  stage: scan
+  image: python:3.11-slim
+  script:
+    - apt-get update && apt-get install -y curl
+    - curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash
+    - gitleaks detect --source . --no-banner --exit-code 1
+
+container_scan:
+  stage: build
+  image: docker:24
+  services:
+    - docker:dind
+  script:
+    - docker build -t devsecops-demo:latest .
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/workdir" aquasec/trivy:0.57.1 image --severity HIGH,CRITICAL devsecops-demo:latest
+
+terraform_deploy:
+  stage: deploy
+  image: hashicorp/terraform:1.8.5
+  script:
+    - cd terraform
+    - terraform init
+    - terraform validate
+    - terraform plan -out=tfplan
+    - terraform apply -auto-approve tfplan
+```
+
+## Example expected output
 
 ```text
-$ gitleaks detect --source . --no-banner --exit-code 1
-2026-10-14T10:00:00Z INFO  No leaks found
-2026-10-14T10:00:00Z INFO  0 findings detected
+$ az login
+You have logged in to Microsoft Azure.
+
+$ terraform -chdir=terraform apply -auto-approve
+azurerm_resource_group.rg: Creating...
+azurerm_container_registry.acr: Creating...
+azurerm_storage_account.sa: Creating...
+Apply complete! Resources: 3 added, 0 changed, 0 destroyed.
 
 $ trivy image --severity HIGH,CRITICAL devsecops-demo:latest
 2026-10-14T10:00:00Z INFO  Vulnerability scanning is enabled
-2026-10-14T10:00:00Z WARN  1 vulnerability found
-
-$ terraform -chdir=terraform apply -auto-approve
-aws_s3_bucket.artifact_store: Creating...
-aws_s3_bucket.artifact_store: Creation complete after 12s
-Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+2026-10-14T10:00:00Z WARN  0 criticals, 1 high found
 ```
+
+## Security notes
+
+- Never commit Azure secrets or credentials directly to source control.
+- Prefer Azure Key Vault, environment variables, or secure CI secret managers.
+- Scan pipeline must fail on high-risk secret leaks or critical vulnerabilities.
+- Treat Terraform changes as infrastructure policy gates.
 
 ## License
 
-This project is licensed under the MIT License.
+MIT

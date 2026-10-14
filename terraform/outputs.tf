@@ -1,9 +1,15 @@
-output "bucket_name" {
-  description = "Name of the S3 bucket created for artifacts"
-  value       = aws_s3_bucket.artifact_store.bucket
+output "resource_group_name" {
+  value = azurerm_resource_group.rg.name
 }
 
-output "bucket_arn" {
-  description = "ARN of the S3 bucket created for artifacts"
-  value       = aws_s3_bucket.artifact_store.arn
+output "storage_account_name" {
+  value = azurerm_storage_account.sa.name
+}
+
+output "container_registry_name" {
+  value = azurerm_container_registry.acr.name
+}
+
+output "container_registry_login_server" {
+  value = azurerm_container_registry.acr.login_server
 }
