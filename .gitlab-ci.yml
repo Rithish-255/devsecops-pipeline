@@ -1,0 +1,42 @@
+stages:
+  - secret_scan
+  - image_scan
+  - terraform
+  - deploy
+
+variables:
+  TF_VAR_aws_region: "us-east-1"
+
+secret_scan:
+  stage: secret_scan
+  image: python:3.11-slim
+  script:
+    - apt-get update && apt-get install -y curl
+    - curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash
+    - gitleaks detect --source . --no-banner --exit-code 1
+
+image_scan:
+  stage: image_scan
+  image: docker:24
+  services:
+    - docker:dind
+  script:
+    - docker build -t devsecops-demo:latest .
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/workdir" aquasec/trivy:0.57.1 image --severity HIGH,CRITICAL devsecops-demo:latest
+
+terraform:
+  stage: terraform
+  image: hashicorp/terraform:1.8.5
+  script:
+    - cd terraform
+    - terraform init
+    - terraform validate
+    - terraform plan -out=tfplan
+
+deploy:
+  stage: deploy
+  image: hashicorp/terraform:1.8.5
+  script:
+    - cd terraform
+    - terraform apply -auto-approve tfplan
+  when: on_success
